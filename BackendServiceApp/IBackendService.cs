@@ -30,7 +30,7 @@ namespace BackendServiceApp
             ResponseFormat = WebMessageFormat.Json,
             RequestFormat = WebMessageFormat.Json
           )]
-        bool UpdateUserREST(UserLegitimation user, Person person);
+        string UpdateUserREST(UserLegitimation user, Person person);
                 
         [OperationContract]
         [WebInvoke(Method = "POST",
@@ -67,7 +67,7 @@ namespace BackendServiceApp
             ResponseFormat = WebMessageFormat.Json,
             RequestFormat = WebMessageFormat.Json
           )]
-        string InsertTripDataREST(long id, UserLegitimation user, TripJson trip);
+        string InsertTripDataREST(long id, UserLegitimation user, Person person, TripJson trip);
         
         [OperationContract]  
         [WebInvoke(Method = "POST",
@@ -76,7 +76,7 @@ namespace BackendServiceApp
             ResponseFormat = WebMessageFormat.Json,
             RequestFormat = WebMessageFormat.Json
           )]
-        bool UpdateTripDataREST(UserLegitimation user, Trip trip, TripChain tripChain);
+        string UpdateTripDataREST(long id, UserLegitimation user, Person person, TripJson trip);
 
         [OperationContract]
         [WebInvoke(Method = "POST",
@@ -86,28 +86,114 @@ namespace BackendServiceApp
             RequestFormat = WebMessageFormat.Json
           )]
         string AuthenticateUserREST(UserLegitimation user);
+
+        [OperationContract]
+        [WebInvoke(Method = "POST",
+            UriTemplate = Routing.SendEmailForNewPasswordRoute,
+            BodyStyle = WebMessageBodyStyle.Wrapped,
+            ResponseFormat = WebMessageFormat.Json,
+            RequestFormat = WebMessageFormat.Json
+          )]
+        string SendEmailForNewPasswordREST(UserLegitimation user);
+
+        //[OperationContract]
+        //[WebInvoke(Method = "POST",
+        //    UriTemplate = Routing.AuthenticateActivationCodeRoute,
+        //    BodyStyle = WebMessageBodyStyle.Wrapped,
+        //    ResponseFormat = WebMessageFormat.Json,
+        //    RequestFormat = WebMessageFormat.Json
+        //  )]
+        //string AuthenticateActivationCodeREST(UserLegitimation user, string activationCode);
+
+        [OperationContract]
+        [WebInvoke(Method = "POST",
+            UriTemplate = Routing.ResetPasswordRoute,
+            BodyStyle = WebMessageBodyStyle.Wrapped,
+            ResponseFormat = WebMessageFormat.Json,
+            RequestFormat = WebMessageFormat.Json
+          )]
+        string ResetPasswordREST(UserLegitimation user, string activationCode);
+
+        [OperationContract]
+        [WebInvoke(Method = "POST",
+            UriTemplate = Routing.DeleteUserRoute,
+            BodyStyle = WebMessageBodyStyle.Wrapped,
+            ResponseFormat = WebMessageFormat.Json,
+            RequestFormat = WebMessageFormat.Json
+          )]
+        string DeleteUserREST(UserLegitimation user);
+
+        [OperationContract]
+        [WebInvoke(Method = "POST",
+            UriTemplate = Routing.DeleteTripByIdRoute,
+            BodyStyle = WebMessageBodyStyle.Wrapped,
+            ResponseFormat = WebMessageFormat.Json,
+            RequestFormat = WebMessageFormat.Json
+          )]
+        string DeleteTripByIdREST(UserLegitimation user, long id);
+
+        [OperationContract]
+        [WebInvoke(Method = "POST",
+            UriTemplate = Routing.DeleteAllTripsRoute,
+            BodyStyle = WebMessageBodyStyle.Wrapped,
+            ResponseFormat = WebMessageFormat.Json,
+            RequestFormat = WebMessageFormat.Json
+          )]
+        string DeleteAllTripsREST(UserLegitimation user);
     }
   
     // Use a data contract as illustrated in the sample below to add composite types to service operations.
-    
-    public enum Gender
+
+    //default value is 0 (user does not set anything)
+    public enum NumberOfChildren
     { 
-        Male = 0,
+        NotProvided = 0,
+        NoChildren,
+        One,
+        Two,
+        Three,  
+        Four, 
+        FiveOrMore
+    }
+
+    public enum Subscription
+    {
+        NotProvided = 0,
+        TravelCard,
+        MonthlyCard,
+        SingleTickets
+    }
+    public enum Gender
+    {
+        NotProvided = 0,
+        Male,
         Female
     }
     
     public enum TransportMode
-    { 
-        Walk = 0, 
-        Bike,
-        Bus,
+    {
+        NotProvided = 0,
+        Bus, 
         Tram,
-        Car
+        Subway,
+        Walk,
+        Bike
     }
-    
-    public enum ResidenceCommunity
-    { 
-        Oslo = 0,
+
+    public enum MaritalStatus
+    {
+        NotProvided = 0,
+        Single,
+        Married,
+        Partner,
+        Divorced,
+        Widowed
+    }
+
+    public enum Residence
+    {
+        NotProvided = 0,
+        Oslo,
         Bærum,
         Asker,
         Oppegård,
@@ -133,9 +219,10 @@ namespace BackendServiceApp
         Other
     }
     
-    public enum City
+    public enum Area
     {
-        Alna = 0,
+        NotProvided = 0,
+        Alna,
         Bjerke,
         Frogner,
         GamleOslo,
@@ -154,7 +241,8 @@ namespace BackendServiceApp
     
     public enum Occupation
     {
-        Employed = 0,
+        NotProvided = 0,
+        Employed,
         Retired,
         Student,
         MilitaryService,
@@ -164,8 +252,9 @@ namespace BackendServiceApp
     }
     
     public enum TripPurpose
-    {
-        Work = 0,
+    {   
+        NotProvided = 0,
+        Work,
         BusinessService,
         School,
         AccompanyOthers,
@@ -173,8 +262,21 @@ namespace BackendServiceApp
         Leisure,
         Home
     }
-    
+
     //tracking info for location is saved in this class structure
+    [DataContract]
+    public class ActivationCode
+    {
+        [BsonId]
+        [DataMember]
+        public string acID { get; set; }//MongoDB purpose
+        [DataMember]
+        public string userName { get; set; }
+
+        [DataMember]
+        public string activationCode { get; set; }
+    }
+
     [DataContract]
     public class Location
     {
@@ -196,19 +298,37 @@ namespace BackendServiceApp
         [DataMember]
         public string userID { get; set; }//MongoDB purpose        
         [DataMember]
-        public int gender { get; set; }
+        public int GenderId { get; set; }
         [DataMember]
-        public int birthYear { get; set; }
+        public string GenderName { get; set; }
         [DataMember]
-        public int occupation { get; set; }
+        public int maritalStatusId { get; set; }
         [DataMember]
-        public bool travelCard { get; set; }
+        public string maritalStatusName { get; set; }        
         [DataMember]
-        public int community { get; set; }
+        public int numChildrenId { get; set; }
         [DataMember]
-        public int city { get; set; }
+        public string numChildrenName { get; set; }
         [DataMember]
-        public string phoneNumber { get; set; }
+        public int birthyearId { get; set; }
+        [DataMember]
+        public string birthyearName { get; set; }//0: Not tell, 1: Under 18        
+        [DataMember]
+        public int occupationId { get; set; }
+        [DataMember]
+        public string occupationName { get; set; }
+        [DataMember]
+        public int subscriptionId { get; set; }
+        [DataMember]
+        public string subscriptionName { get; set; }
+        [DataMember]
+        public int residenceId { get; set; }
+        [DataMember]
+        public string residenceName { get; set; }
+        [DataMember]
+        public int areaId { get; set; }
+        [DataMember]
+        public string areaName { get; set; }
     }    
         
     [DataContract]
@@ -222,16 +342,7 @@ namespace BackendServiceApp
         [DataMember]
         public string pinCode { get; set; } 
     }
-    //[DataContract]
-    //public class TripHistory 
-    //{
-    //    [DataMember]
-    //    public int tripHistoryID { get; set; }
-    //    [DataMember]
-    //    public int userID { get; set; }//MongoDB purpose
-    //    [DataMember]
-    //    public int tripID { get; set; }//MongoDB purpose
-    //}
+    
     [DataContract]
     public class Trip
     {
@@ -240,16 +351,18 @@ namespace BackendServiceApp
         public string tripID { get; set; }//MongoDB purpose
         [DataMember]
         public string userID { get; set; }//MongoDB purpose
-        [DataMember]
-        public string startLocationID { get; set; }
-        [DataMember]
-        public string endLocationID { get; set; }
+        //[DataMember]
+        //public string startLocationID { get; set; }
+        //[DataMember]
+        //public string endLocationID { get; set; }
         [DataMember]
         public double distance { get; set; }
         [DataMember]
         public DateTime tripDate { get; set; }
         [DataMember]
-        public int tripPurpose { get; set; }
+        public int tripPurposeId { get; set; }
+        [DataMember]
+        public string tripPurposeName { get; set; }
     }
         
     [DataContract]
@@ -267,9 +380,17 @@ namespace BackendServiceApp
         [DataMember]
         public float timeAmount { get; set; } //in minutes
         [DataMember]
-        public float speed { get; set; } //in km/h
+        public double altitude { get; set; }
         [DataMember]
-        public int mode { get; set; }
+        public double accuracy { get; set; }
+        [DataMember]
+        public double altitudeAccuracy { get; set; }
+        [DataMember]
+        public double heading { get; set; }
+        [DataMember]
+        public double speed { get; set; } //in km/h
+        //[DataMember] //For now, mode relates to trip chain by comparing timestamps to decide which mode is used in the specific trip chain.
+        //public int mode { get; set; }
         [DataMember]
         public bool questionable { get; set; }
         [DataMember]
@@ -277,9 +398,28 @@ namespace BackendServiceApp
     }
 
     [DataContract]
+    public class Mode
+    {
+        [BsonId]
+        [DataMember]
+        public string modeID { get; set; }
+        [DataMember]
+        public string tripID { get; set; }
+        [DataMember]
+        public int mode { get; set; }
+        [DataMember]
+        public long timestamp { get; set; }
+        
+    }
+
+    [DataContract]
     public class TripJson
     {
+        [DataMember]
         public TripDetailJson meta { get; set; }
+        [DataMember]
+        public List<TransportModeJson> modes { get; set; }
+        [DataMember]
         public List<TripChainJson> entries { get; set; }
     }
 
@@ -287,14 +427,32 @@ namespace BackendServiceApp
     public class TripChainJson
     {
         [DataMember]
-        public List<object> numbers { get; set; }
-    //    [DataMember]
-    //    public long timeStamp { get; set; }
-    //    [DataMember]
-    //    public double latitude { get; set; }
-    //    [DataMember]
-    //    public double longitude { get; set; }
+        public long timestamp { get; set; }
+        [DataMember]
+        public double latitude { get; set; }
+        [DataMember]
+        public double longitude { get; set; }
+        [DataMember]
+        public double altitude { get; set; }
+        [DataMember]
+        public double accuracy { get; set; }
+        [DataMember]
+        public double altitudeAccuracy { get; set; }
+        [DataMember]
+        public double heading { get; set; }
+        [DataMember]
+        public double speed { get; set; }
     }
+
+    [DataContract]
+    public class TransportModeJson
+    {
+        [DataMember]
+        public int mode { get; set; }
+        [DataMember]
+        public long time { get; set; }
+    }
+
     [DataContract]
     public class TripDetailJson
     {
@@ -317,4 +475,10 @@ public static class Routing
     public const string GetTripsByDateRoute = "/GetTripsByDateREST";
     public const string GetTripChainsRoute = "/GetTripChainsREST";
     public const string GetTripsByUserIdRoute = "/GetTripsByUserIdREST";
+    public const string ResetPasswordRoute = "/ResetPasswordREST";
+    public const string SendEmailForNewPasswordRoute = "/SendEmailForNewPasswordREST";
+    //public const string AuthenticateActivationCodeRoute = "/AuthenticateActivationCodeREST";
+    public const string DeleteUserRoute = "/DeleteUserREST";
+    public const string DeleteTripByIdRoute = "/DeleteTripByIdREST";
+    public const string DeleteAllTripsRoute = "/DeleteAllTripsREST";
 }

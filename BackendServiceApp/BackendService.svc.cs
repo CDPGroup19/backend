@@ -79,7 +79,7 @@ namespace BackendServiceApp
             }
             return null;
         }
-        
+
         /// <summary>
         /// Insert a new user into data storage
         /// </summary>
@@ -96,73 +96,130 @@ namespace BackendServiceApp
         /// <param name="city"></param>
         /// <param name="phoneNumber"></param>
         /// <returns>userID</returns>
-        public string InsertUser(string dbName, string dbUserName, string dbPassWord, UserLegitimation user)
+        public void InsertUser(string dbName, string dbUserName, string dbPassWord, UserLegitimation user, bool isInsert, out string statusMessage)
         {
+            statusMessage = null;
             string userID;
-            string result;
             try
             {
                 MongoDatabase resultDB = GetMongoDatabase(dbName, dbUserName, dbPassWord);
                 if (resultDB == null)
-                    throw new Exception();
+                {
+                    statusMessage = "Database is null";
+                    return;
+                }
                 MongoCollection<UserLegitimation> users = resultDB.GetCollection<UserLegitimation>("users");
-                userID = MakeId(user.userName, user.pinCode);
-                
+                userID = CheckUserExists(user.userName, users, out statusMessage);
+                if (userID != null)
+                {
+                    if (isInsert)
+                    {
+                        statusMessage = "Username is taken.";
+                        return;
+                    }
+                    else //remove the current user and insert new row with same userID and userName, only different pincode
+                    {
+                        var userQuery = Query.EQ("_id", userID);
+                        if (userQuery != null)
+                            users.Remove(userQuery);
+                    }
+                }
+                if (isInsert)
+                    userID = MakeId(user.userName, user.pinCode);                
+
                 UserLegitimation newUser = new UserLegitimation
                 {
                     userID = userID,
                     userName = user.userName,
                     pinCode = user.pinCode
                 };
-                users.Insert(newUser);                
-                result = userID;
+                users.Insert(newUser);
             }
             catch (Exception e)
             {
                 //Handle exception
-                result = null;
+                statusMessage = "An exception has occured in InsertUser method. " + e.Message;
             }
-            return result;
         }
 
-        public bool UpdateUser(string dbName, string dbUserName, string dbPassWord, UserLegitimation user, Person person)
+        private string CheckUserExists(string userName, MongoCollection<UserLegitimation> users, out string statusMessage)
         {
-            bool result = false;
+            statusMessage = null;
+            string userID = null;
+            try
+            {
+                if (users.Count() > 0)
+                {
+                    var userQuery = Query.EQ("userName", userName);
+                    var existedUser = users.FindOne(userQuery);
+                    if (existedUser != null)
+                        userID = (existedUser as UserLegitimation).userID;
+                }
+            }
+            catch (Exception e)
+            {
+                userID = null;
+                statusMessage = "An exception has occured in CheckUserExists method. " + e.Message;
+            }
+            return userID;
+        }
+
+        public void UpdateUser(string dbName, string dbUserName, string dbPassWord, UserLegitimation user, Person person, out string statusMessage)
+        {
+            statusMessage = null;
             try
             {
                 MongoDatabase resultDB = GetMongoDatabase(dbName, dbUserName, dbPassWord);
                 if (resultDB == null)
-                    throw new Exception();
-                MongoCollection<Person> persons = persons = resultDB.GetCollection<Person>("persons");                
+                {
+                    statusMessage = "Database is null";
+                    return;
+                }
+                user.userID = AuthenticateUser(_dbName, _userName, _passWord, user, out statusMessage);
+                if (statusMessage != null)
+                    return;
+                MongoCollection<Person> persons = persons = resultDB.GetCollection<Person>("persons");
                 if (persons.Count() > 0)
                 {
                     var personQuery = Query<Person>.EQ(e => e.userID, user.userID);
-                    //var temp = persons.FindOne(personQuery);
                     if (personQuery != null)
-                    { 
-                        persons.Remove(personQuery);                        
-                    }                    
+                    {
+                        persons.Remove(personQuery);
+                    }
                 }
-                //File.WriteAllText(@"C:\Visual Studio 2013\JsonData\updateuser.txt", "(persons.Count()) " + persons.Count() + " (birthyear) "+person.birthYear + " (phonenumber) " + person.phoneNumber);
+
                 Person newPerson = new Person
                 {
                     userID = user.userID,
-                    gender = person.gender,
-                    birthYear = person.birthYear,
-                    travelCard = person.travelCard,
-                    occupation = person.occupation,
-                    community = person.community,
-                    city = person.city,
-                    phoneNumber = person.phoneNumber
+                    GenderId = person.GenderId,
+                    birthyearId = person.birthyearId,
+                    occupationId = person.occupationId,
+                    residenceId = person.residenceId,
+                    areaId = person.areaId,
+                    numChildrenId = person.numChildrenId,
+                    maritalStatusId = person.maritalStatusId,
+                    subscriptionId = person.subscriptionId
                 };
+                                
+                if (newPerson.birthyearId == 0)
+                    newPerson.birthyearName = "NotProvided";
+                else if (newPerson.birthyearId == 1)
+                    newPerson.birthyearName = "Under18";
+                else newPerson.birthyearName = newPerson.birthyearId.ToString();
+
+                newPerson.GenderName = ((Gender)newPerson.GenderId).ToString();
+                newPerson.occupationName = ((Occupation)newPerson.occupationId).ToString();
+                newPerson.residenceName = ((Residence)newPerson.residenceId).ToString();
+                newPerson.areaName = ((Area)newPerson.areaId).ToString();
+                newPerson.numChildrenName = ((NumberOfChildren)newPerson.numChildrenId).ToString();
+                newPerson.maritalStatusName = ((MaritalStatus)newPerson.maritalStatusId).ToString();
+                newPerson.subscriptionName = ((Subscription)newPerson.subscriptionId).ToString();
                 persons.Insert(newPerson);
-                result = true;
             }
             catch (Exception e)
             {
-                result = false;
+                statusMessage += "An exception has occured in UpdateUser method. " + e.Message;
             }
-            return result;
         }
 
         private string MakeId(string userName, string phoneNumber)
@@ -175,7 +232,7 @@ namespace BackendServiceApp
             try
             {
                 if (!userName.Equals(null) && !phoneNumber.Equals(null))
-                    result = CreateSHAHash(userName, phoneNumber);        
+                    result = CreateSHAHash(userName, phoneNumber);
             }
             catch (Exception)
             {
@@ -194,78 +251,115 @@ namespace BackendServiceApp
             return Convert.ToBase64String(EncryptedBytes);
         }
 
-        public string InsertTripData(string dbName, string dbUserName, string dbPassWord, UserLegitimation user, Trip trip, List<TripChainJson> locations)
+        public void InsertTripData(string dbName, string dbUserName, string dbPassWord, UserLegitimation user, Person person, Trip trip, List<TripChainJson> locations, List<TransportModeJson> modes, bool isInsert, out string statusMessage)
         {
-            string result = null;
+            statusMessage = null;
             string locID = null;
             try
-            {                
+            {
                 MongoDatabase resultDB = GetMongoDatabase(dbName, dbUserName, dbPassWord);
                 if (resultDB == null)
-                    throw new Exception();
-                //Check locations exists. If not, add and return new locID. If exists, return locID.
-                int i = 0;
-                MongoCollection<TripChain> tripChains = resultDB.GetCollection<TripChain>("tripChains");
-                MongoCollection<Location> mglocations = resultDB.GetCollection<Location>("locations");
-                foreach(TripChainJson tj in locations)
                 {
-                    double latitude = double.Parse(tj.numbers[1].ToString());
-                    double longitude = double.Parse(tj.numbers[2].ToString());
-                    locID = CheckLocExists(latitude, longitude, mglocations);
-                    if (locID == null)
-                        locID = AddLocation(dbName, dbUserName, dbPassWord, tj);
-                    if (i == 0)
-                        trip.startLocationID = locID;
-                    if (i == locations.Count - 1)
-                        trip.endLocationID = locID;
-                    i++;
-                    TripChain tc = new TripChain 
+                    statusMessage = "Database is null";
+                    return;
+                }
+
+                UpdateUser(_dbName, _userName, _passWord, user, person, out statusMessage);
+                if (statusMessage != null) return;
+                //Check locations exists. If not, add and return new locID. If exists, return locID.
+
+                MongoCollection<TripChain> tripChains = resultDB.GetCollection<TripChain>("tripChains");
+                MongoCollection<Location> mgLocations = resultDB.GetCollection<Location>("locations");
+                MongoCollection<Mode> mgModes = resultDB.GetCollection<Mode>("modes");
+                foreach (TripChainJson tj in locations)
+                {
+                    locID = CheckLocExists(tj.latitude, tj.longitude, mgLocations, out statusMessage);
+                    if (locID == null && statusMessage == null)
+                        locID = AddLocation(dbName, dbUserName, dbPassWord, tj, out statusMessage);
+                    if (statusMessage != null) return;
+                    TripChain tc = new TripChain
                     {
-                        tripID = trip.tripID, 
-                        tripChainID = tj.numbers[0].ToString(), 
+                        tripID = trip.tripID,
+                        tripChainID = tj.timestamp.ToString(),
                         locationChainID = locID,
-                        timeStamp = long.Parse(tj.numbers[0].ToString()),
+                        timeStamp = tj.timestamp,
+                        accuracy = tj.accuracy,
+                        altitude = tj.altitude,
+                        altitudeAccuracy = tj.altitudeAccuracy,
+                        heading = tj.heading,
+                        speed = tj.speed
                     };
+                    if (isInsert == false) //this trip chain is existed -> remove it -> insert new info with same id (= existed id)
+                    {
+                        var tripChainQuery = Query<TripChain>.EQ(e => e.tripChainID, tc.tripChainID);
+                        if (tripChainQuery != null)                                      
+                            tripChains.Remove(tripChainQuery);
+                    }
                     tripChains.Insert(tc);                    
                 }
-                
+
+                foreach (TransportModeJson tm in modes)
+                {
+                    Mode m = new Mode
+                    {
+                        modeID = tm.time.ToString(),
+                        tripID = trip.tripID,
+                        timestamp = tm.time,
+                        mode = tm.mode
+                    };
+                    if (isInsert == false) //this trip chain is existed -> remove it -> insert new info with same id (= existed id)
+                    {
+                        var modeQuery = Query<Mode>.EQ(e => e.timestamp, m.timestamp);
+                        if (modeQuery != null)
+                            mgModes.Remove(modeQuery);
+                    }
+                    mgModes.Insert(m);
+                }
+
                 MongoCollection<Trip> trips = resultDB.GetCollection<Trip>("trips");
-                File.WriteAllText(@"C:\Visual Studio 2013\JsonData\inserttrip.txt", "(trips.Count()) " + trips.Count() + " (tripID) " + trip.tripID + " (tripDate) " + trip.tripDate);
                 //tripID will be made from the front end
                 Trip newTrip = new Trip
                 {
                     tripID = trip.tripID,
                     userID = user.userID,
-                    startLocationID=trip.startLocationID,
-                    endLocationID=trip.endLocationID,
-                    tripDate=trip.tripDate,
-                    tripPurpose=trip.tripPurpose                    
+                    distance = trip.distance,
+                    tripDate = trip.tripDate,
+                    tripPurposeId = trip.tripPurposeId,
+                    tripPurposeName = ((TripPurpose)trip.tripPurposeId).ToString()
                 };
+                if (isInsert == false) //this trip chain is existed -> remove it -> insert new info with same id (= existed id)
+                {
+                    var tripQuery = Query<Trip>.EQ(e => e.tripID, newTrip.tripID);
+                    if (tripQuery != null)
+                        trips.Remove(tripQuery);
+                }
                 trips.Insert(newTrip);
-                result = trip.tripID;
             }
             catch (Exception e)
             {
-                result = null;
+                statusMessage += "An exception has occured in InsertTripData method. " + e.Message;
             }
-            return result;
         }
 
-        private string AddLocation(string dbName, string dbUserName, string dbPassWord, TripChainJson tj)
+        private string AddLocation(string dbName, string dbUserName, string dbPassWord, TripChainJson tj, out string statusMessage)
         {
+            statusMessage = null;
             string result = null;
             try
             {
                 MongoDatabase resultDB = GetMongoDatabase(dbName, dbUserName, dbPassWord);
                 if (resultDB == null)
-                    throw new Exception();
+                {
+                    statusMessage = "Database is null";
+                    return result;
+                }
                 MongoCollection<Location> locations = resultDB.GetCollection<Location>("locations");
-                string locID = MakeId(tj.numbers[1].ToString(), tj.numbers[2].ToString());
+                string locID = MakeId(tj.latitude.ToString(), tj.longitude.ToString());
                 Location newLoc = new Location
                 {
                     locationID = locID,
-                    longitude = double.Parse(tj.numbers[2].ToString()),
-                    latitude = double.Parse(tj.numbers[1].ToString())
+                    longitude = tj.longitude,
+                    latitude = tj.latitude
                 };
                 locations.Insert(newLoc);
                 result = locID;
@@ -273,72 +367,36 @@ namespace BackendServiceApp
             catch (Exception e)
             {
                 result = null;
+                statusMessage = "An exception has occured in AddLocation method. " + e.Message;
             }
             return result;
         }
 
-        private string CheckLocExists(double latitude, double longitude, MongoCollection<Location> locations)
+        private string CheckLocExists(double latitude, double longitude, MongoCollection<Location> locations, out string statusMessage)
         {
+            statusMessage = null;
             string locationID = null;
             try
             {
                 if (locations.Count() > 0)
                 {
-                    var locationQuery = Query.And(Query.EQ("longtitude", longitude), Query.EQ("latitude", latitude));
-                    locationID = (locationQuery as Location).locationID;
+                    var locationQuery = Query.And(Query.EQ("longitude", longitude), Query.EQ("latitude", latitude));
+                    var existedLocation = locations.FindOne(locationQuery);
+                    if (existedLocation != null)
+                        locationID = (existedLocation as Location).locationID;
+                    //File.WriteAllText(@"C:\locations.txt", "(current locationQuery) = " + locationQuery.ToJson() + " (current existedLocation) = " + existedLocation.ToJson() + " locationID = " + locationID + " " + DateTime.Now);
                 }
             }
             catch (Exception e)
             {
                 locationID = null;
+                statusMessage = "An exception has occured in CheckLocExists method. " + e.Message;
             }
             return locationID;
         }
-               
-        //private string LocationExists(string longitude, string latitude, MongoCollection<Location> locations)
-        //{
-        //    string locationID = null;
-        //    try
-        //    {
-        //        if (locations.Count() > 0)
-        //        {            
-        //            var locationQuery = Query.And(Query.EQ("longtitude", longitude), Query.EQ("latitude", latitude));            
-        //            locationID = (locationQuery as Location).locationID;
-        //        }
-        //    }
-        //    catch (Exception e)
-        //    {
-        //        locationID = null;
-        //    }
-        //    return locationID;
-        //}
-
-        public bool UpdateTripData(string dbName, string dbUserName, string dbPassWord, UserLegitimation user, Trip trip, TripChain tripChain)
-        {
-            bool result = false;
-            try
-            {
-                MongoDatabase resultDB = GetMongoDatabase(dbName, dbUserName, dbPassWord);
-                if (resultDB == null)
-                    throw new Exception();
-                //Get locationID 
-                MongoCollection<TripChain> tripChains = resultDB.GetCollection<TripChain>("tripChains");
-                //Add new trip chain
-                //Edit trip chain
-                if (tripChains.Count() > 0)
-                {
-                    //var tripChainsQuery = from tc in tripChains.AsQueryable<TripChain>() where tc..longitude == longitude && l.latitude == latitude select l;
-                    //locationID = (locationQuery as Location).locationID;
-                }
-            }
-            catch (Exception e)
-            {
-                result = false;
-            }
-            return result;
-        }
 
         /// <summary>
+        /// NOT TESTED
         /// Json object from front-end parse: userID
         /// </summary>
         /// <param name="dbName"></param>
@@ -346,7 +404,7 @@ namespace BackendServiceApp
         /// <param name="passWord"></param>
         /// <param name="user">json object</param>
         /// <returns>the Person object of the given userID</returns>
-        
+
         public Person GetPersonByUserId(string dbName, string userName, string passWord, UserLegitimation user)
         {
             MongoCollection<Person> persons = null;
@@ -356,11 +414,14 @@ namespace BackendServiceApp
                 MongoDatabase resultDB = GetMongoDatabase(dbName, userName, passWord);
                 if (resultDB == null)
                     throw new Exception();
-                persons = resultDB.GetCollection<Person>("persons");                
+                persons = resultDB.GetCollection<Person>("persons");
                 if (persons.Count() > 0)
                 {
-                    var personQuery = from p in persons.AsQueryable<Person>() where p.userID == user.userID select p;
-                    result = personQuery as Person;
+                    var personQuery = Query.EQ("userID", user.userID);
+                    var existedPerson = persons.FindOne(personQuery);
+                    //var personQuery = from p in persons.AsQueryable<Person>() where p.userID == user.userID select p;
+                    if (existedPerson != null)
+                        result = existedPerson as Person;
                 }
             }
             catch (Exception e)
@@ -371,7 +432,7 @@ namespace BackendServiceApp
         }
 
         #region For reference
-        
+
         //must have an ID when using Save 
         //MongoCollection<BsonDocument> books;
         //var query = Query.And(
@@ -436,6 +497,7 @@ namespace BackendServiceApp
         #endregion
 
         /// <summary>
+        /// NOT TESTED
         /// Json object from front-end parse: userID
         /// </summary>
         /// <param name="dbName"></param>
@@ -454,12 +516,15 @@ namespace BackendServiceApp
                 if (resultDB == null)
                     throw new Exception();
                 trips = resultDB.GetCollection<Trip>("trips");
-                
-                if(trips.Count() > 0)
+
+                if (trips.Count() > 0)
                 {
-                    var tripsQuery = from t in trips.AsQueryable<Trip>() where t.userID == user.userID select t;
-                    result = tripsQuery as List<Trip>;
-               }
+                    //var tripsQuery = from t in trips.AsQueryable<Trip>() where t.userID == user.userID select t;
+                    var tripsQuery = Query.EQ("userID", user.userID);
+                    var existedTrips = trips.Find(tripsQuery);
+                    if (existedTrips != null)
+                        result = existedTrips.ToList<Trip>();
+                }
             }
             catch (Exception e)
             {
@@ -469,6 +534,7 @@ namespace BackendServiceApp
         }
 
         /// <summary>
+        /// NOT TESTED
         /// Json object from front-end parse: tripID
         /// </summary>
         /// <param name="dbName"></param>
@@ -488,17 +554,29 @@ namespace BackendServiceApp
 
                 if (tripChains.Count() > 0)
                 {
-                    var tripChainsQuery = from tc in tripChains.AsQueryable<TripChain>() where tc.tripID == trip.tripID select tc;
-                    result = tripChainsQuery as List<TripChain>;
+                    var tripChainsQuery = Query.EQ("tripID", trip.tripID);
+                    var existedtripChains = tripChains.Find(tripChainsQuery);
+                    //var tripChainsQuery = from tc in tripChains.AsQueryable<TripChain>() where tc.tripID == trip.tripID select tc;
+                    if (existedtripChains != null)
+                        result = existedtripChains.ToList<TripChain>();
                 }
             }
             catch (Exception e)
             {
                 //Handle exception
             }
-            return result;            
+            return result;
         }
 
+        /// <summary>
+        /// NOT TESTED
+        /// </summary>
+        /// <param name="dbName"></param>
+        /// <param name="userName"></param>
+        /// <param name="passWord"></param>
+        /// <param name="user"></param>
+        /// <param name="date"></param>
+        /// <returns></returns>
         public List<Trip> GetTripsByDate(string dbName, string userName, string passWord, UserLegitimation user, DateTime date)
         {
             List<Trip> result = null;
@@ -511,8 +589,11 @@ namespace BackendServiceApp
 
                 if (trips.Count() > 0)
                 {
-                    var tripsQuery = from t in trips.AsQueryable<Trip>() where t.userID == user.userID && t.tripDate == date select t;
-                    result = tripsQuery as List<Trip>;
+                    var tripsQuery = Query.And(Query.EQ("userID", user.userID), Query.EQ("tripDate", date));
+                    var existedTrips = trips.Find(tripsQuery);
+                    //var tripsQuery = from t in trips.AsQueryable<Trip>() where t.userID == user.userID && t.tripDate == date select t;
+                    if (existedTrips != null)
+                        result = existedTrips.ToList<Trip>();
                 }
             }
             catch (Exception e)
@@ -521,96 +602,105 @@ namespace BackendServiceApp
             }
             return result;
         }
-        
-        #endregion
 
-        #region REST services
-        public string InsertNewUserREST(UserLegitimation user)
-        {            
-            string  result = null;       
+        public string ExtractTripData(long id, UserLegitimation user, Person person, TripJson trip, out Trip tripData, out List<TripChainJson> locations, out List<TransportModeJson> modes, out string statusMessage)
+        {
+            statusMessage = null;
+            tripData = new Trip();
+            locations = new List<TripChainJson>();
+            modes = new List<TransportModeJson>();
             try
-            { 
-                result = InsertUser(_dbName, _userName, _passWord, user);
-                //File.WriteAllText(@"C:\Visual Studio 2013\JsonData\text.txt", "user is : (userID) = " + result + " (userName) = " + user.userName + " (pinCode) = " + user.pinCode +  DateTime.Now);          
+            {
+                tripData.tripID = id.ToString();
+                if (trip.meta != null)
+                {
+                    tripData.tripDate = new DateTime(1970, 1, 1) + new TimeSpan(trip.meta.startTime * 10000);
+                    tripData.distance = trip.meta.distance;
+                    tripData.tripPurposeId = trip.meta.purpose;
+                }
+                if (trip.entries != null)
+                {
+                    foreach (var e in trip.entries)
+                    {
+                        TripChainJson tcjs = new TripChainJson()
+                        {
+                            timestamp = e.timestamp,
+                            latitude = e.latitude,
+                            longitude = e.longitude,
+                            altitude = e.altitude,
+                            accuracy = e.accuracy,
+                            altitudeAccuracy = e.altitudeAccuracy,
+                            heading = e.heading,
+                            speed = e.speed
+                        };
+                        locations.Add(tcjs);
+                    }
+                }
+
+                if (trip.modes != null)
+                {
+                    foreach (var m in trip.modes)
+                    {
+                        TransportModeJson tmjs = new TransportModeJson()
+                        {
+                            time = m.time,
+                            mode = m.mode
+                        };
+                        modes.Add(tmjs);
+                    }
+                }
             }
             catch (Exception e)
+            {
+                statusMessage = "An exception has occured in ExtractTripData method. " + e.Message;
+            }
+            return statusMessage;
+        }
+
+        //random string generator         
+        public string CreateActivationCode(int size)
+        {
+            Random _rng = new Random();
+            const string _chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            char[] buffer = new char[size];
+
+            for (int i = 0; i < size; i++)
+            {
+                buffer[i] = _chars[_rng.Next(_chars.Length)];
+            }    
+            return new string(buffer);
+        }
+
+        public string CreateAndSaveActivationCode(string dbName, string dbUserName, string dbPassWord, string userName, out string activationCode)
+        {
+            string statusMessage = null;
+            activationCode = null;
+            try 
+            {
+                activationCode = CreateActivationCode(6);
+                MongoDatabase resultDB = GetMongoDatabase(dbName, dbUserName, dbPassWord);
+                if (resultDB == null)
+                {
+                    statusMessage = "Database is null";
+                    return statusMessage;
+                }
+
+                MongoCollection<ActivationCode> activationCodes = resultDB.GetCollection<ActivationCode>("activationCodes");
+                if (activationCodes != null) //check for activation code existence to overwrite, i.e. one user has only one activation code
+                {
+                    var query = Query<ActivationCode>.EQ(e => e.userName, userName);
+                    if (query != null)
+                        activationCodes.Remove(query);
+                }
+                activationCodes.Insert(new ActivationCode() {acID = userName + activationCode, userName = userName, activationCode = activationCode });
+                statusMessage = "ok";
+            }
+            catch (Exception e) 
             {
                 //Handle exception                
-            }            
-            return result;
-        }
-        public string InsertTripDataREST(long id, UserLegitimation user, TripJson trip)
-        {
-  //          "id":1382525646764,
-  //"user":{"userName":"kitty","pinCode":"1234"},
-  //"trip":{
-  //  "meta":{
-  //    "startTime":1382441890677,
-  //    "distance":21,
-  //    "purpose":0
-  //  },
-  //  "entries":[[1382525629947,63.4136106,10.4155071], [1382525635930,63.4136106,10.4155071],[1382525641932,63.4136106,10.4155071]]
-  //}
-            
-            //TripJson tripjs = JsonConvert.DeserializeObject<TripJson>(trip);
-            
-            string result = null;
-            Trip tripData = new Trip();
-            List<TripChainJson> locations = new List<TripChainJson>();
-            string locs = "";
-            string tripstr = trip.ToJson();
-            try
-            {                
-                //user.userID = AuthenticateUser(_dbName, _userName, _passWord, user);
-                //if (user.userID == null)
-                //    throw new Exception();
-                tripData.tripID = id.ToString();
-                if (trip.meta != null) locs = "trip meta not null"; else locs = "trip meta null";
-                if (trip.entries != null) locs += " trip entries not null"; else locs += " trip entries null";
-                //if (tripjs.meta != null)
-                //{
-                //    tripData.tripDate = new DateTime(1970, 1, 1) + new TimeSpan(tripjs.meta.startTime * 10000);                                 
-                //    tripData.distance = tripjs.meta.distance;
-                //    tripData.tripPurpose = tripjs.meta.purpose;
-                //}
-                //if (trip.entries != null)
-                //{                    
-                //    foreach (var e in trip.entries)
-                //    {
-                //        TripChainJson tcjs = new TripChainJson() { numbers = e.numbers };
-                //        locations.Add(tcjs);
-                //    }
-                //}
-                
-                //if (locations.Count() > 0)
-                //{
-                //    foreach (TripChainJson tc in locations)
-                //    {
-                //        for (int i = 0; i < tc.numbers.Count(); i++)
-                //        {
-                //            if (tc.numbers[i] != null)
-                //            {
-                //                locs += tc.numbers[i].ToString();
-                //            }
-                //        }
-                //        locs += "//";
-                //    }
-                //}
-                //File.WriteAllText(@"C:\Visual Studio 2013\JsonData\inserttripdata.txt", " id " + id + " user has : (userName) = " + user.userName + " (pinCode) =  " + user.pinCode + " trip = " + trip.ToString() + " " + DateTime.Now);
-                File.WriteAllText(@"C:\Visual Studio 2013\JsonData\inserttripdata.txt", " id " + id + " trip has (tripDate) = " + tripData.tripDate + " (distance) = " + tripData.distance + " (purpose) = " + tripData.tripPurpose + " " + locs + " tripstr = " + tripstr + " " + DateTime.Now);
-                
-                //result = InsertTripData(_dbName, _userName, _passWord, user, tripData, locations);
+                statusMessage += "An exception has occured in CreateAndSaveActivationCode method. " + e.Message;
             }
-            catch (Exception e)
-            {
-                result = null;
-            }
-            return result;
-        }
-              
-        public bool UpdateTripDataREST(UserLegitimation user, Trip trip, TripChain tripChain)
-        { 
-            return false;
+            return statusMessage;
         }
 
         /// <summary>
@@ -620,28 +710,115 @@ namespace BackendServiceApp
         /// </summary>
         /// <param name="user"></param>
         /// <returns>userID</returns>
-        public string AuthenticateUser(string dbName, string userName, string passWord, UserLegitimation user)
+        public string AuthenticateUser(string dbName, string userName, string passWord, UserLegitimation user, out string statusMessage)
         {
-            string userID = null;
+            statusMessage = null;
+            string result = null;
             try
             {
                 MongoDatabase resultDB = GetMongoDatabase(dbName, userName, passWord);
                 if (resultDB == null)
-                    throw new Exception();
+                {
+                    statusMessage = "Database is null";
+                    return result;
+                }
                 MongoCollection<UserLegitimation> users = resultDB.GetCollection<UserLegitimation>("users");
                 if (users.Count() > 0)
                 {
                     var userQuery = Query.And(Query.EQ("userName", user.userName), Query.EQ("pinCode", user.pinCode));
-                    userID = (userQuery as UserLegitimation).userID;
+                    var existedUser = users.FindOne(userQuery);
+                    if (existedUser != null)
+                        result = (existedUser as UserLegitimation).userID;
+                }
+                if (result == null)
+                {
+                    statusMessage = "Cannot authenticate this user.";
                 }
             }
             catch (Exception e)
             {
-                userID = null;
+                statusMessage += Environment.NewLine + "An exception has occured in AuthenticateUser method. " + e.Message;
             }
-            return userID;
-        }      
+            return result;
+        }
 
+   
+        #endregion
+
+        #region REST services
+        public string InsertNewUserREST(UserLegitimation user)
+        {
+            string statusMessage = null;
+            try
+            {
+                InsertUser(_dbName, _userName, _passWord, user, true, out statusMessage);
+                if (statusMessage == null)
+                    statusMessage = "ok";
+            }
+            catch (Exception e)
+            {
+                //Handle exception                
+                statusMessage += "An exception has occured in InsertNewUserREST method. " + e.Message;
+            }            
+            return statusMessage;
+        }
+
+        public string InsertTripDataREST(long id, UserLegitimation user, Person person, TripJson trip)
+        {
+            string statusMessage = null;
+            Trip tripData = new Trip();
+            List<TripChainJson> locations = new List<TripChainJson>();
+            List<TransportModeJson> modes = new List<TransportModeJson>();
+
+            try
+            {
+                statusMessage = ExtractTripData(id, user, person, trip, out tripData, out locations, out modes, out statusMessage);
+                if(statusMessage == null)
+                { 
+                    InsertTripData(_dbName, _userName, _passWord, user, person, tripData, locations, modes, true, out statusMessage);
+                    if (statusMessage == null)
+                        statusMessage = "ok";
+                }
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in InsertTripDataREST method. " + e.Message;
+            }
+            //if (statusMessage != null)
+            //    File.AppendAllText(@"C:\logs.txt", Environment.NewLine + "<statusMessage - " + DateTime.Now + ">: " + statusMessage);
+            return statusMessage;
+        }
+        /// <summary>        
+        /// </summary>
+        /// <param name="user"></param>
+        /// <param name="trip"></param>
+        /// <param name="tripChain"></param>
+        /// <returns></returns>
+        public string UpdateTripDataREST(long id, UserLegitimation user, Person person, TripJson trip)
+        {
+            string statusMessage = null;
+            Trip tripData = new Trip();
+            List<TripChainJson> locations = new List<TripChainJson>();
+            List<TransportModeJson> modes = new List<TransportModeJson>();
+
+            try
+            {
+                statusMessage = ExtractTripData(id, user, person, trip, out tripData, out locations, out modes, out statusMessage);
+                if (statusMessage == null)
+                {
+                    InsertTripData(_dbName, _userName, _passWord, user, person, tripData, locations, modes, false, out statusMessage);
+                    if (statusMessage == null)
+                        statusMessage = "ok";
+                }
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in UpdateTripDataREST method. " + e.Message;
+            }
+            //if (statusMessage != null)
+            //    File.AppendAllText(@"C:\logs.txt", Environment.NewLine + "<statusMessage - " + DateTime.Now + ">: " + statusMessage);
+            return statusMessage;
+        }
 
         public List<Trip> GetTripsByDateREST(UserLegitimation user, DateTime date)
         {
@@ -659,95 +836,285 @@ namespace BackendServiceApp
         }
 
 
-        public bool UpdateUserREST(UserLegitimation user, Person person)
+        public string UpdateUserREST(UserLegitimation user, Person person)
         {
-            bool result = false;
+            string statusMessage = null;
             try
             {
-                result = UpdateUser(_dbName, _userName, _passWord, user, person);
-                //File.WriteAllText(@"C:\Visual Studio 2013\JsonData\text.txt", "user is : (userID) = " + result + " (userName) = " + user.userName + " (pinCode) = " + user.pinCode +  DateTime.Now);          
+                UpdateUser(_dbName, _userName, _passWord, user, person, out statusMessage);
+                if (statusMessage == null)
+                    statusMessage = "ok";
+            }
+            catch (Exception e)
+            {
+                //Handle exception    
+                statusMessage += "An exception has occured in UpdateUserREST method. " + e.Message;
+            }
+            //if (statusMessage != null)
+            //    File.AppendAllText(@"C:\logs.txt", Environment.NewLine + "<statusMessage - " + DateTime.Now + ">: " + statusMessage);
+            return statusMessage;
+        }
+
+        public string AuthenticateUserREST(UserLegitimation user)
+        {
+            string statusMessage = null;
+            try
+            {
+                AuthenticateUser(_dbName, _userName, _passWord, user, out statusMessage);
+                if (statusMessage == null)
+                    statusMessage = "ok";
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in AuthenticateUserREST method. " + e.Message;
+            }
+            //if(statusMessage != null)
+            //    File.AppendAllText(@"C:\logs.txt", Environment.NewLine + "<statusMessage - " + DateTime.Now + ">: "+ statusMessage);
+            return statusMessage;
+        }
+
+        public string SendEmailForNewPasswordREST(UserLegitimation user)
+        {
+            string statusMessage = null;
+            try
+            {
+                //Create activation code and save to database
+                string activationCode = null;
+                statusMessage = CreateAndSaveActivationCode(_dbName, _userName, _passWord, user.userName, out activationCode);
+                if (statusMessage == "ok")
+                {
+                    string from = "smio19noreply@gmail.com";
+                    string to = user.userName;
+                    System.Net.Mail.MailMessage msg = new System.Net.Mail.MailMessage(from, to);
+                    msg.Subject = "Reset password";
+                    msg.Body = "Please use this code to activate reset password process: " + activationCode;
+                    System.Net.Mail.SmtpClient oSmtpClient = new System.Net.Mail.SmtpClient();
+                    oSmtpClient.Send(msg);
+                    statusMessage = "ok";
+                }
+            }
+            catch (Exception e)
+            {
+                statusMessage = "An exception has occured in SendEmailForNewPasswordREST method. " + e.Message;
+            }
+            return statusMessage;
+        }
+
+        public string AuthenticateActivationCodeREST(UserLegitimation user, string activationCode)
+        {
+            string statusMessage = null;            
+            try 
+            { 
+                MongoDatabase resultDB = GetMongoDatabase(_dbName, _userName, _passWord);
+                if (resultDB == null)
+                {
+                    statusMessage = "Database is null";
+                    return statusMessage;
+                }
+
+                MongoCollection<ActivationCode> activationCodes = resultDB.GetCollection<ActivationCode>("activationCodes");
+                if (activationCodes != null)
+                {
+                    var activationCodeQuery = Query.And(Query.EQ("userName", user.userName), Query.EQ("activationCode", activationCode));
+                    var existedCode = activationCodes.FindOne(activationCodeQuery);
+                    if (existedCode == null)
+                        statusMessage = "Invalid activation code for this user.";    
+                    else
+                        statusMessage = "ok";
+                     
+                }
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in AuthenticateActivationCodeREST method. " + e.Message;
+            }
+            return statusMessage;
+        }
+
+        public string ResetPasswordREST(UserLegitimation user, string activationCode)
+        {
+            string statusMessage = null;
+            try
+            {
+                statusMessage = AuthenticateActivationCodeREST(user, activationCode);
+                if (statusMessage == "ok")
+                {
+                    InsertUser(_dbName, _userName, _passWord, user, false, out statusMessage);
+                    if (statusMessage == null)
+                        statusMessage = "ok";
+                }
             }
             catch (Exception e)
             {
                 //Handle exception                
+                statusMessage += "An exception has occured in ResetPasswordREST method. " + e.Message;
             }
-            return result;
+            return statusMessage;
         }
-        #endregion               
-    
-
-        public string AuthenticateUserREST(UserLegitimation user)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
-    //public class Utilities : IDispatchMessageInspector
-    //{
-    //    public string USER_HEADER1 = "Origin";
-    //    public string USER_HEADER2 = "Access-Control-Allow-Origin";
-    //    public static object sourceDomain = null;
-    //    object IDispatchMessageInspector.AfterReceiveRequest(ref System.ServiceModel.Channels.Message request, System.ServiceModel.IClientChannel channel, System.ServiceModel.InstanceContext instanceContext)
-    //    {
-    //        request.Headers.CopyHeaderFrom()
-    //        HttpRequestMessageProperty httpRequestMessage;
-    //        object httpRequestMessageObject;
-    //        if (request.Properties.TryGetValue(HttpRequestMessageProperty.Name, out httpRequestMessageObject))
-    //        {
-    //            httpRequestMessage = httpRequestMessageObject as HttpRequestMessageProperty;
-    //            sourceDomain = httpRequestMessage.Headers[USER_HEADER1];
-    //            request.Headers.
-    //            //Response.AppendHeader("Access-Control-Allow-Origin", sourceDomain );
-    //        }
-    //        return null;
-    //    }
-
-    //    void BeforeSendReply(ref System.ServiceModel.Channels.Message reply, object correlationState)
-    //    {
-    //        MessageHeader newMessageHeader = MessageHeader.CreateHeader(USER_HEADER2,)
-    //        HttpResponseMessageProperty httpResponseMessage;
-    //        reply.Headers.Add(Properties.TryGetValue
-    //        responseMessageProperty.Headers.Add(USER_HEADER2, sourceDomain);
-    //        responseMessageProperty.Headers.Add(USER_HEADER2)
-    //            reply.Headers.CopyHeadersFrom(message.Headers);
-    //    replacedMessage.Properties.CopyProperties(message.Properties);
-    //    {
-    //        // Inspect the reply, catch a possible validation error 
-    //        try
-    //        {
-    //            ValidateMessageBody(ref reply, false);
-    //        }
-    //        catch ((ReplyValidationFault fault)
-    //        {
-    //            // if a validation error occurred, the message is replaced
-    //            // with the validation fault.
-    //            reply = Message.CreateMessage(reply.Version, 
-    //                    fault.CreateMessageFault(), reply.Headers.Action);
-    //        }
-    //    }
         
-    //    public object BeforeSendRequest(ref System.ServiceModel.Channels.Message request, System.ServiceModel.IClientChannel channel)
-    //    {
-    //        HttpRequestMessageProperty httpRequestMessage;
-    //        object httpRequestMessageObject;
-    //        if (request.Properties.TryGetValue(HttpRequestMessageProperty.Name, out httpRequestMessageObject))
-    //        {
-    //            httpRequestMessage = httpRequestMessageObject as HttpRequestMessageProperty;
-    //            sourceDomain = httpRequestMessage.Headers[USER_HEADER1];
-    //            //Response.AppendHeader("Access-Control-Allow-Origin", sourceDomain );
-    //        }
-    //        return null;
-    //    }
+        public string DeleteUserREST(UserLegitimation user)
+        {            
+            //delete userlegitimation, person, trips, tripChains, modes, activationcode
+            string statusMessage = null;
+            UserLegitimation target = null;
+            try
+            {
+                MongoDatabase resultDB = GetMongoDatabase(_dbName, _userName, _passWord);
+                if (resultDB == null)
+                {
+                    statusMessage = "Database is null";
+                    return statusMessage;
+                }
+                AuthenticateUser(_dbName, _userName, _passWord, user, out statusMessage);
+                if (statusMessage != null)
+                    return statusMessage;
+                MongoCollection<UserLegitimation> users = resultDB.GetCollection<UserLegitimation>("users");
+                if (users != null)
+                {
+                    var userQuery = Query.EQ("userName", user.userName);
+                    var existedUser = users.FindOne(userQuery);
+                    if (existedUser != null)
+                    { 
+                        target = (existedUser as UserLegitimation);
+                        MongoCollection<Person> persons = resultDB.GetCollection<Person>("persons");
+                        var personQuery = Query<Person>.EQ(e => e.userID, target.userID);
+                        if (personQuery != null)
+                            persons.Remove(personQuery);
 
-    //    public void AfterReceiveReply(ref Message reply, object correlationState)
-    //    {
-    //        HttpResponseMessageProperty httpResponseMessage = reply.Headers.GetHeader<;
-    //        httpResponseMessage.Headers.Add(USER_HEADER2, sourceDomain.ToString());
-    //        object httpResponseMessageObject = httpResponseMessage;
-    //        reply.Headers.Add((MessageHeader)httpResponseMessageObject);
-    //    }
-    //}
+                        MongoCollection<ActivationCode> activationCodes = resultDB.GetCollection<ActivationCode>("activationCodes");
+                        var codeQuery = Query<ActivationCode>.EQ(e => e.userName, user.userName);
+                        if (codeQuery != null)
+                            activationCodes.Remove(codeQuery);
 
+                        DeleteTrip(target, resultDB);
+                        userQuery = Query<UserLegitimation>.EQ(e => e.userName, user.userName);  
+                        users.Remove(userQuery);
+                        statusMessage = "ok";
+                    }
+                    else
+                        statusMessage += "Invalid user.";                    
+                }
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in DeleteUserREST method. " + e.Message;
+            }
+            return statusMessage;
+        }
+
+        public string DeleteAllTripsREST(UserLegitimation user)
+        {
+            string statusMessage = null;
+            UserLegitimation target = null;
+            try
+            {
+                MongoDatabase resultDB = GetMongoDatabase(_dbName, _userName, _passWord);
+                if (resultDB == null)
+                {
+                    statusMessage = "Database is null";
+                    return statusMessage;
+                }
+                AuthenticateUser(_dbName, _userName, _passWord, user, out statusMessage);
+                if (statusMessage != null)
+                    return statusMessage;
+                MongoCollection<UserLegitimation> users = resultDB.GetCollection<UserLegitimation>("users");
+                if (users != null)
+                {
+                    var userQuery = Query.EQ("userName", user.userName);
+                    var existedUser = users.FindOne(userQuery);
+                    if (existedUser != null)
+                    {
+                        target = (existedUser as UserLegitimation);
+                        DeleteTrip(target, resultDB);                        
+                        statusMessage = "ok";
+                    }
+                    else
+                        statusMessage += "Invalid user.";
+                }
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in DeleteAllTripsREST method. " + e.Message;
+            }
+            return statusMessage;
+        }
+
+        public void DeleteTrip(UserLegitimation target, MongoDatabase resultDB)
+        {
+            MongoCollection<Trip> trips = resultDB.GetCollection<Trip>("trips");
+            MongoCollection<TripChain> tripChains = resultDB.GetCollection<TripChain>("tripChains");
+            MongoCollection<Mode> modes = resultDB.GetCollection<Mode>("modes");
+            var tripsQuery = Query.EQ("userID", target.userID);
+            var existedTrips = trips.Find(tripsQuery);
+            if (existedTrips != null)
+            {
+                List<Trip> userTrips = existedTrips.ToList<Trip>();
+                if (userTrips != null && userTrips.Count > 0)
+                {
+                    foreach (Trip t in userTrips)
+                    {
+                        var tripChainsQuery = Query<TripChain>.EQ(e => e.tripID, t.tripID);
+                        if (tripChainsQuery != null)
+                            tripChains.Remove(tripChainsQuery);
+
+
+                        var modeQuery = Query<Mode>.EQ(e => e.tripID, t.tripID);
+                        if (modeQuery != null)
+                            modes.Remove(modeQuery);
+                    }
+                }
+                tripsQuery = Query<Trip>.EQ(e => e.userID, target.userID);
+                trips.Remove(tripsQuery);
+            }
+        }
+
+        public string DeleteTripByIdREST(UserLegitimation user, long id)
+        {
+            string statusMessage = null;
+            try
+            {
+                MongoDatabase resultDB = GetMongoDatabase(_dbName, _userName, _passWord);
+                if (resultDB == null)
+                {
+                    statusMessage = "Database is null";
+                    return statusMessage;
+                }
+
+                AuthenticateUser(_dbName, _userName, _passWord, user, out statusMessage);
+                if (statusMessage != null)
+                    return statusMessage;
+
+                MongoCollection<Trip> trips = resultDB.GetCollection<Trip>("trips");
+                MongoCollection<TripChain> tripChains = resultDB.GetCollection<TripChain>("tripChains");
+                MongoCollection<Mode> modes = resultDB.GetCollection<Mode>("modes");
+                if (trips != null)
+                {                    
+                        var tripChainsQuery = Query<TripChain>.EQ(e => e.tripID, id.ToString());
+                        if (tripChainsQuery != null)
+                           tripChains.Remove(tripChainsQuery);
+
+                        var modeQuery = Query<Mode>.EQ(e => e.tripID, id.ToString());
+                        if (modeQuery != null)
+                            modes.Remove(modeQuery);
+                    
+                        var tripQuery = Query<Trip>.EQ(e => e.tripID, id.ToString());
+                        if (tripQuery != null)
+                        {
+                            trips.Remove(tripQuery);
+                            statusMessage = "ok";
+                        }                
+                        else statusMessage = "Cannot find this trip.";
+                }                
+            }
+            catch (Exception e)
+            {
+                statusMessage += "An exception has occured in DeleteTripByIdREST method. " + e.Message;
+            }
+            return statusMessage;
+        }
+
+        #endregion
+    }
 }
 
 
